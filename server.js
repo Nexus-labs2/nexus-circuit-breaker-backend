@@ -1,9 +1,20 @@
 const express = require("express");
+const cors = require("cors");
+
 const app = express();
 
+/* ===== FORCE CORS (VERY IMPORTANT) ===== */
+app.use((req, res, next) => {
+  res.header("Access-Control-Allow-Origin", "*");
+  res.header("Access-Control-Allow-Headers", "*");
+  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  next();
+});
+
+app.use(cors());
 app.use(express.json());
 
-/* ===== DATA STORAGE ===== */
+/* ===== DATA ===== */
 let systemData = {
   board1: { voltage: 0, current: 0, power: 0, t1: 100, t2: 200, t3: 300 },
   board2: { voltage: 0, current: 0, power: 0, t1: 100, t2: 200, t3: 300 },
@@ -13,55 +24,34 @@ let systemData = {
   gas: 0
 };
 
-/* ===== RECEIVE DATA FROM ESP32 ===== */
+/* ===== TEST ROUTE ===== */
+app.get("/", (req, res) => {
+  res.send("Backend Running");
+});
+
+/* ===== RECEIVE ===== */
 app.post("/api/data", (req, res) => {
   const incoming = req.body;
 
+  console.log("DATA RECEIVED:", incoming);
+
   Object.keys(incoming).forEach(key => {
-    if(systemData[key]) {
-      systemData[key] = { ...systemData[key], ...incoming[key] };
+    if (systemData[key]) {
+      systemData[key] = {
+        ...systemData[key],
+        ...incoming[key]
+      };
     }
   });
 
-  res.send("Data received");
+  res.send("OK");
 });
 
-/* ===== SEND DATA TO DASHBOARD ===== */
+/* ===== SEND ===== */
 app.get("/api/data", (req, res) => {
   res.json(systemData);
 });
 
-/* ===== UPDATE THRESHOLDS ===== */
-app.post("/api/config", (req, res) => {
-  const { board, key, value } = req.body;
-
-  systemData[`board${board}`][key] = Number(value);
-  res.send("Updated");
-});
-
-/* ===== ML PREDICTION ===== */
-app.post("/api/predict", (req, res) => {
-  const data = req.body;
-
-  let future = { b1: [], b2: [], b3: [], b4: [] };
-  let risk = "LOW";
-  let message = "System stable";
-
-  for (let i = 1; i <= 4; i++) {
-    let p = data[`board${i}`]?.power || 0;
-
-    for (let t = 1; t <= 5; t++) {
-      future[`b${i}`].push(p + t * 20);
-    }
-
-    if (p > 250) {
-      risk = "HIGH";
-      message = `⚠ Board ${i} overload soon`;
-    }
-  }
-
-  res.json({ risk, message, future });
-});
-
-/* ===== START SERVER ===== */
-app.listen(3000, () => console.log("Server running on port 3000"));
+/* ===== START ===== */
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log("Server running"));
