@@ -55,3 +55,31 @@ app.get("/api/data", (req, res) => {
 /* ===== START ===== */
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log("Server running"));
+app.post("/api/predict", (req, res) => {
+  const data = req.body;
+
+  let future = { b1: [], b2: [], b3: [], b4: [] };
+  let risk = "LOW";
+  let message = "System stable";
+
+  for (let i = 1; i <= 4; i++) {
+    let p = data[`board${i}`]?.power || 0;
+
+    // Simple prediction (trend-based)
+    for (let t = 1; t <= 10; t++) {
+      future[`b${i}`].push(p + t * 15);
+    }
+
+    if (p > 200) {
+      risk = "MEDIUM";
+      message = `⚡ Board ${i} increasing load`;
+    }
+
+    if (p > 300) {
+      risk = "HIGH";
+      message = `⚠ Board ${i} overload risk`;
+    }
+  }
+
+  res.json({ risk, message, future });
+});
