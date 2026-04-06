@@ -10,36 +10,35 @@ const supabase = createClient(
   "sb_publishable_UKNlHlpoKUICvhcH7Xdi9Q_2FCEZDvs"
 );
 
-/* ===== CORS ===== */
+/* ===== MIDDLEWARE ===== */
 app.use(cors());
 app.use(express.json());
 
-/* ===== DATA ===== */
+/* ===== SYSTEM DATA ===== */
 let systemData = {
-  board1: { voltage: 0, current: 0, power: 0, t1: 100, t2: 200, t3: 300, relay: true },
-  board2: { voltage: 0, current: 0, power: 0, t1: 100, t2: 200, t3: 300, relay: true },
-  board3: { voltage: 0, current: 0, power: 0, t1: 100, t2: 200, t3: 300, relay: true },
-  board4: { voltage: 0, current: 0, power: 0, t1: 100, t2: 200, t3: 300, relay: true },
-
+  boards: {
+    1: { voltage: 0, current: 0, power: 0, relay: true },
+    2: { voltage: 0, current: 0, power: 0, relay: true },
+    3: { voltage: 0, current: 0, power: 0, relay: true },
+    4: { voltage: 0, current: 0, power: 0, relay: true }
+  },
   temperature: 0,
   gas: 0,
-
   coolingFan: false,
-  alerts: []
+  alerts: [],
+  ai: {
+    risk: "LOW",
+    message: "System stable",
+    score: 0
+  }
 };
 
-/* ===== TEST ===== */
-app.get("/", (req, res) => {
-  res.send("Backend Running 🚀");
-});
-
-/* ===== ALERT FUNCTION (NO SPAM) ===== */
+/* ===== ALERT SYSTEM ===== */
 function addAlert(msg) {
-  const last = systemData.alerts[systemData.alerts.length - 1];
+  const last = systemData.alerts.at(-1);
+  if (last && last.message === msg) return;
 
-  if (last && last.message === msg) return; // prevent duplicate spam
-
-  console.log("ALERT:", msg);
+  console.log("🚨", msg);
 
   systemData.alerts.push({
     message: msg,
@@ -51,158 +50,130 @@ function addAlert(msg) {
   }
 }
 
-/* ===== THRESHOLD CHECK ===== */
+/* ===== AI FAULT PREDICTION ===== */
+function runAI() {
+  let riskScore = 0;
+  let message = "System stable";
+
+  for (let i = 1; i <= 4; i++) {
+    const b = systemData.boards[i];
+
+    // Rule-based AI (can upgrade to ML later)
+    if (b.current > 15) riskScore += 30;
+    if (b.power > 300) riskScore += 40;
+    if (b.voltage < 5 && b.current > 10) {
+      riskScore += 50;
+      message = `⚠ Short Circuit suspected on Board ${i}`;
+    }
+  }
+
+  if (systemData.temperature > 50) riskScore += 30;
+  if (systemData.gas > 1) riskScore += 40;
+
+  let risk = "LOW";
+  if (riskScore > 80) risk = "CRITICAL";
+  else if (riskScore > 50) risk = "HIGH";
+  else if (riskScore > 25) risk = "MEDIUM";
+
+  systemData.ai = { risk, message, score: riskScore };
+
+  if (risk === "CRITICAL") {
+    addAlert("🚨 AI detected CRITICAL fault risk!");
+  }
+}
+
+/* ===== THRESHOLD LOGIC ===== */
 function checkThresholds() {
   for (let i = 1; i <= 4; i++) {
-    let board = systemData[`board${i}`];
-    if (!board) continue;
+    let b = systemData.boards[i];
 
-    if (board.power >= board.t1 && board.power < board.t2) {
-      addAlert(`⚠ Board ${i} reached Threshold 1`);
-    }
-
-    if (board.power >= board.t2 && board.power < board.t3) {
-      addAlert(`⚡ Board ${i} reached Threshold 2`);
-    }
-
-    if (board.power >= board.t3) {
-      board.relay = false;
-      addAlert(`🚨 Board ${i} exceeded Threshold 3 → POWER CUT`);
+    if (b.power > 400) {
+      b.relay = false;
+      addAlert(`⚡ Board ${i} power cut due to overload`);
     }
   }
 }
 
-/* ===== SAFETY CHECK ===== */
+/* ===== SAFETY ===== */
 function checkSafety() {
   if (systemData.temperature > 50) {
     systemData.coolingFan = true;
-    addAlert("🔥 High Temperature! Cooling Fan Activated");
+    addAlert("🔥 High temperature detected");
   } else {
     systemData.coolingFan = false;
   }
 
   if (systemData.gas > 1) {
-    addAlert("☠ Gas Leakage Detected!");
+    addAlert("☠ Gas leakage detected");
   }
 }
 
-/* ===== SAVE TO SUPABASE ===== */
+/* ===== SAVE DATA ===== */
 async function saveToSupabase(data) {
-  const { error } = await supabase.from("sensor_data").insert([
+  await supabase.from("sensor_data").insert([
     {
-      board1_power: data.board1?.power ?? null,
-      board2_power: data.board2?.power ?? null,
-      board3_power: data.board3?.power ?? null,
-      board4_power: data.board4?.power ?? null,
-      temperature: data.temperature ?? null,
-      gas: data.gas ?? null
+      board1_power: data.boards[1].power,
+      board2_power: data.boards[2].power,
+      board3_power: data.boards[3].power,
+      board4_power: data.boards[4].power,
+      temperature: data.temperature,
+      gas: data.gas,
+      ai_risk: data.ai.risk,
+      ai_score: data.ai.score
     }
   ]);
-
-  if (error) {
-    console.error("❌ Supabase Error:", error.message);
-  } else {
-    console.log("✅ Data saved to Supabase");
-  }
 }
 
-/* ===== RECEIVE DATA ===== */
+/* ===== ROUTES ===== */
+
+app.get("/", (req, res) => {
+  res.send("🚀 AI Circuit Breaker Backend Running");
+});
+
+/* RECEIVE DATA */
 app.post("/api/data", async (req, res) => {
   const incoming = req.body;
 
-  console.log("DATA RECEIVED:", incoming);
+  console.log("📥 Incoming:", incoming);
 
-  // Merge board data safely
   for (let i = 1; i <= 4; i++) {
     if (incoming[`board${i}`]) {
-      systemData[`board${i}`] = {
-        ...systemData[`board${i}`],
-        ...incoming[`board${i}`]
-      };
+      let b = incoming[`board${i}`];
+      systemData.boards[i].voltage = b.voltage || 0;
+      systemData.boards[i].current = b.current || 0;
+      systemData.boards[i].power =
+        systemData.boards[i].voltage * systemData.boards[i].current;
     }
   }
 
-  // Merge global values
-  if (incoming.temperature !== undefined) {
-    systemData.temperature = incoming.temperature;
-  }
+  systemData.temperature = incoming.temperature ?? systemData.temperature;
+  systemData.gas = incoming.gas ?? systemData.gas;
 
-  if (incoming.gas !== undefined) {
-    systemData.gas = incoming.gas;
-  }
-
-  // Recalculate power
-  for (let i = 1; i <= 4; i++) {
-    let b = systemData[`board${i}`];
-    b.power = (b.voltage ?? 0) * (b.current ?? 0);
-  }
-
-  // Run logic
   checkThresholds();
   checkSafety();
+  runAI();
 
-  // Save to Supabase
   await saveToSupabase(systemData);
 
-  res.send("OK");
+  res.json({ status: "OK", ai: systemData.ai });
 });
 
-/* ===== SEND DATA ===== */
+/* SEND DATA */
 app.get("/api/data", (req, res) => {
   res.json(systemData);
 });
 
-/* ===== HISTORY FROM SUPABASE ===== */
+/* HISTORY */
 app.get("/api/history", async (req, res) => {
-  const { data, error } = await supabase
+  const { data } = await supabase
     .from("sensor_data")
     .select("*")
     .order("created_at", { ascending: false })
     .limit(50);
 
-  if (error) {
-    return res.status(500).send(error.message);
-  }
-
   res.json(data);
 });
 
-/* ===== ML + FAULT DETECTION ===== */
-app.post("/api/predict", (req, res) => {
-  const data = req.body;
-
-  let future = { b1: [], b2: [], b3: [], b4: [] };
-  let risk = "LOW";
-  let message = "System stable";
-
-  for (let i = 1; i <= 4; i++) {
-    let v = data[`board${i}`]?.voltage || 0;
-    let c = data[`board${i}`]?.current || 0;
-    let p = v * c;
-
-    for (let t = 1; t <= 10; t++) {
-      future[`b${i}`].push(p + t * 20);
-    }
-
-    if (v < 5 && c > 10) {
-      risk = "CRITICAL";
-      message = `⚠ Short Circuit in Board ${i}`;
-    }
-
-    if (p > 350) {
-      risk = "HIGH";
-      message = `⚡ Power Surge in Board ${i}`;
-    }
-
-    if (c > 15) {
-      risk = "MEDIUM";
-      message = `⚠ Abnormal Current in Board ${i}`;
-    }
-  }
-
-  res.json({ risk, message, future });
-});
-
-/* ===== START SERVER ===== */
-const PORT = process.env.PORT || 3000;
+/* START */
+const PORT = 3000;
 app.listen(PORT, () => console.log(`🚀 Server running on ${PORT}`));
