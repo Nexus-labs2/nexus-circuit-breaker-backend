@@ -1,16 +1,16 @@
 const express = require("express");
 const cors = require("cors");
+const { createClient } = require("@supabase/supabase-js");
 
 const app = express();
 
-/* ===== CORS ===== */
-app.use((req, res, next) => {
-  res.header("Access-Control-Allow-Origin", "*");
-  res.header("Access-Control-Allow-Headers", "*");
-  res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  next();
-});
+/* ===== SUPABASE CONFIG ===== */
+const supabase = createClient(
+  "https://tdawapextufttejeivps.supabase.co",
+  "sb_publishable_UKNlHlpoKUICvhcH7Xdi9Q_2FCEZDvs"
+);
 
+/* ===== CORS ===== */
 app.use(cors());
 app.use(express.json());
 
@@ -25,7 +25,6 @@ let systemData = {
   gas: 0,
 
   coolingFan: false,
-
   alerts: []
 };
 
@@ -34,15 +33,19 @@ app.get("/", (req, res) => {
   res.send("Backend Running 🚀");
 });
 
-/* ===== ALERT FUNCTION ===== */
+/* ===== ALERT FUNCTION (NO SPAM) ===== */
 function addAlert(msg) {
+  const last = systemData.alerts[systemData.alerts.length - 1];
+
+  if (last && last.message === msg) return; // prevent duplicate spam
+
   console.log("ALERT:", msg);
+
   systemData.alerts.push({
     message: msg,
     time: new Date()
   });
 
-  // Keep last 20 alerts only
   if (systemData.alerts.length > 20) {
     systemData.alerts.shift();
   }
@@ -52,20 +55,16 @@ function addAlert(msg) {
 function checkThresholds() {
   for (let i = 1; i <= 4; i++) {
     let board = systemData[`board${i}`];
-
     if (!board) continue;
 
-    // Threshold 1
     if (board.power >= board.t1 && board.power < board.t2) {
       addAlert(`⚠ Board ${i} reached Threshold 1`);
     }
 
-    // Threshold 2
     if (board.power >= board.t2 && board.power < board.t3) {
-      addAlert(`⚡ Board ${i} reached Threshold 2 (High Usage)`);
+      addAlert(`⚡ Board ${i} reached Threshold 2`);
     }
 
-    // Threshold 3 (AUTO SHUTDOWN)
     if (board.power >= board.t3) {
       board.relay = false;
       addAlert(`🚨 Board ${i} exceeded Threshold 3 → POWER CUT`);
@@ -75,8 +74,6 @@ function checkThresholds() {
 
 /* ===== SAFETY CHECK ===== */
 function checkSafety() {
-
-  // Temperature check
   if (systemData.temperature > 50) {
     systemData.coolingFan = true;
     addAlert("🔥 High Temperature! Cooling Fan Activated");
@@ -84,36 +81,68 @@ function checkSafety() {
     systemData.coolingFan = false;
   }
 
-  // Gas detection
   if (systemData.gas > 1) {
     addAlert("☠ Gas Leakage Detected!");
   }
 }
 
+/* ===== SAVE TO SUPABASE ===== */
+async function saveToSupabase(data) {
+  const { error } = await supabase.from("sensor_data").insert([
+    {
+      board1_power: data.board1?.power ?? null,
+      board2_power: data.board2?.power ?? null,
+      board3_power: data.board3?.power ?? null,
+      board4_power: data.board4?.power ?? null,
+      temperature: data.temperature ?? null,
+      gas: data.gas ?? null
+    }
+  ]);
+
+  if (error) {
+    console.error("❌ Supabase Error:", error.message);
+  } else {
+    console.log("✅ Data saved to Supabase");
+  }
+}
+
 /* ===== RECEIVE DATA ===== */
-app.post("/api/data", (req, res) => {
+app.post("/api/data", async (req, res) => {
   const incoming = req.body;
 
   console.log("DATA RECEIVED:", incoming);
 
-  Object.keys(incoming).forEach(key => {
-    if (systemData[key]) {
-      systemData[key] = {
-        ...systemData[key],
-        ...incoming[key]
+  // Merge board data safely
+  for (let i = 1; i <= 4; i++) {
+    if (incoming[`board${i}`]) {
+      systemData[`board${i}`] = {
+        ...systemData[`board${i}`],
+        ...incoming[`board${i}`]
       };
     }
-  });
+  }
+
+  // Merge global values
+  if (incoming.temperature !== undefined) {
+    systemData.temperature = incoming.temperature;
+  }
+
+  if (incoming.gas !== undefined) {
+    systemData.gas = incoming.gas;
+  }
 
   // Recalculate power
   for (let i = 1; i <= 4; i++) {
     let b = systemData[`board${i}`];
-    b.power = b.voltage * b.current;
+    b.power = (b.voltage ?? 0) * (b.current ?? 0);
   }
 
   // Run logic
   checkThresholds();
   checkSafety();
+
+  // Save to Supabase
+  await saveToSupabase(systemData);
 
   res.send("OK");
 });
@@ -121,6 +150,21 @@ app.post("/api/data", (req, res) => {
 /* ===== SEND DATA ===== */
 app.get("/api/data", (req, res) => {
   res.json(systemData);
+});
+
+/* ===== HISTORY FROM SUPABASE ===== */
+app.get("/api/history", async (req, res) => {
+  const { data, error } = await supabase
+    .from("sensor_data")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(50);
+
+  if (error) {
+    return res.status(500).send(error.message);
+  }
+
+  res.json(data);
 });
 
 /* ===== ML + FAULT DETECTION ===== */
@@ -136,26 +180,20 @@ app.post("/api/predict", (req, res) => {
     let c = data[`board${i}`]?.current || 0;
     let p = v * c;
 
-    // Prediction
     for (let t = 1; t <= 10; t++) {
       future[`b${i}`].push(p + t * 20);
     }
 
-    /* ===== FAULT DETECTION LOGIC ===== */
-
-    // Short circuit detection
     if (v < 5 && c > 10) {
       risk = "CRITICAL";
-      message = `⚠ Possible Short Circuit in Board ${i}`;
+      message = `⚠ Short Circuit in Board ${i}`;
     }
 
-    // Sudden spike detection
     if (p > 350) {
       risk = "HIGH";
       message = `⚡ Power Surge in Board ${i}`;
     }
 
-    // Abnormal fluctuation
     if (c > 15) {
       risk = "MEDIUM";
       message = `⚠ Abnormal Current in Board ${i}`;
@@ -167,4 +205,4 @@ app.post("/api/predict", (req, res) => {
 
 /* ===== START SERVER ===== */
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+app.listen(PORT, () => console.log(`🚀 Server running on ${PORT}`));
