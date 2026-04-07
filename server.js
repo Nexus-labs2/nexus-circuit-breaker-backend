@@ -5,7 +5,6 @@ const { createClient } = require("@supabase/supabase-js");
 const app = express();
 
 /* ===== SUPABASE CONFIG ===== */
-/* ⚠️ IMPORTANT: Replace with YOUR anon public key */
 const supabase = createClient(
   "https://tdawapextufttejeivps.supabase.co",
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRkYXdhcGV4dHVmdHRlamVpdnBzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0NDcxNTksImV4cCI6MjA5MTAyMzE1OX0.8g9g4wx2rURKhfYDkAdvfMUyp0vtO-ul4TESuw-LjwI"
@@ -113,24 +112,28 @@ function checkSafety() {
 async function saveToSupabase(data) {
   try {
     const payload = {
-      board1_power: data.boards?.[1]?.power ?? 0,
-      board2_power: data.boards?.[2]?.power ?? 0,
-      board3_power: data.boards?.[3]?.power ?? 0,
-      board4_power: data.boards?.[4]?.power ?? 0,
-      temperature: data.temperature ?? 0,
-      gas: data.gas ? true : false, // 🔥 FIXED
-      ai_risk: data.ai?.risk ?? "LOW",
-      ai_score: data.ai?.score ?? 0
+      board1_power: data.boards?.[1]?.power ?? null,
+      board2_power: data.boards?.[2]?.power ?? null,
+      board3_power: data.boards?.[3]?.power ?? null,
+      board4_power: data.boards?.[4]?.power ?? null,
+      temperature: data.temperature ?? null,
+      gas: data.gas ? true : false,
+
+      // ⚡ Only include these if columns exist in DB
+      ai_risk: data.ai?.risk ?? null,
+      ai_score: data.ai?.score ?? null
     };
 
-    console.log("📤 Sending to Supabase:", payload);
+    console.log("📤 Supabase Payload:", payload);
 
-    const { error } = await supabase.from("sensor_data").insert([payload]);
+    const { error } = await supabase
+      .from("sensor_data")
+      .insert([payload]);
 
     if (error) {
       console.error("❌ Supabase Insert Error:", error.message);
     } else {
-      console.log("✅ Data inserted successfully");
+      console.log("✅ Data inserted into Supabase");
     }
 
   } catch (err) {
@@ -144,12 +147,12 @@ app.get("/", (req, res) => {
   res.send("🚀 AI Circuit Breaker Backend Running");
 });
 
-/* RECEIVE DATA */
+/* ===== RECEIVE DATA ===== */
 app.post("/api/data", async (req, res) => {
   try {
     const incoming = req.body;
 
-    console.log("📥 Incoming:", JSON.stringify(incoming, null, 2));
+    console.log("📥 Incoming:", incoming);
 
     for (let i = 1; i <= 4; i++) {
       if (incoming[`board${i}`]) {
@@ -162,14 +165,17 @@ app.post("/api/data", async (req, res) => {
       }
     }
 
-    systemData.temperature = incoming.temperature ?? systemData.temperature;
-    systemData.gas = incoming.gas ?? systemData.gas;
+    if (incoming.temperature !== undefined) {
+      systemData.temperature = incoming.temperature;
+    }
+
+    if (incoming.gas !== undefined) {
+      systemData.gas = incoming.gas;
+    }
 
     checkThresholds();
     checkSafety();
     runAI();
-
-    console.log("🧠 Final System Data:", JSON.stringify(systemData, null, 2));
 
     await saveToSupabase(systemData);
 
@@ -181,12 +187,12 @@ app.post("/api/data", async (req, res) => {
   }
 });
 
-/* SEND DATA */
+/* ===== SEND LIVE DATA ===== */
 app.get("/api/data", (req, res) => {
   res.json(systemData);
 });
 
-/* HISTORY */
+/* ===== HISTORY ===== */
 app.get("/api/history", async (req, res) => {
   try {
     const { data, error } = await supabase
@@ -201,13 +207,15 @@ app.get("/api/history", async (req, res) => {
     }
 
     res.json(data);
+
   } catch (err) {
     res.status(500).send("Error fetching history");
   }
 });
 
-/* START SERVER */
-const PORT = 3000;
+/* ===== START SERVER ===== */
+const PORT = process.env.PORT || 3000;
+
 app.listen(PORT, () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
