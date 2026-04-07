@@ -8,7 +8,7 @@ const app = express();
 /* ⚠️ IMPORTANT: Replace with YOUR anon public key */
 const supabase = createClient(
   "https://tdawapextufttejeivps.supabase.co",
-  "sb_publishable_UKNlHlpoKUICvhcH7Xdi9Q_2FCEZDvs"
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRkYXdhcGV4dHVmdHRlamVpdnBzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzU0NDcxNTksImV4cCI6MjA5MTAyMzE1OX0.8g9g4wx2rURKhfYDkAdvfMUyp0vtO-ul4TESuw-LjwI"
 );
 
 /* ===== MIDDLEWARE ===== */
