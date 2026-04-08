@@ -1,3 +1,4 @@
+const axios = require("axios");
 const express = require("express");
 const cors = require("cors");
 const { createClient } = require("@supabase/supabase-js");
@@ -51,37 +52,17 @@ function addAlert(msg) {
 }
 
 /* ===== AI LOGIC ===== */
-function runAI() {
-  let riskScore = 0;
-  let message = "System stable";
+const mlResponse = await axios.post("http://127.0.0.1:5000/predict", {
+  board1_power: systemData.boards[1].power,
+  board2_power: systemData.boards[2].power,
+  board3_power: systemData.boards[3].power,
+  board4_power: systemData.boards[4].power,
+  temperature: systemData.temperature,
+  gas: systemData.gas
+});
 
-  for (let i = 1; i <= 4; i++) {
-    const b = systemData.boards[i];
-
-    if (b.current > 15) riskScore += 30;
-    if (b.power > 300) riskScore += 40;
-
-    if (b.voltage < 5 && b.current > 10) {
-      riskScore += 50;
-      message = `⚠ Short Circuit suspected on Board ${i}`;
-    }
-  }
-
-  if (systemData.temperature > 50) riskScore += 30;
-  if (systemData.gas > 1) riskScore += 40;
-
-  let risk = "LOW";
-  if (riskScore > 80) risk = "CRITICAL";
-  else if (riskScore > 50) risk = "HIGH";
-  else if (riskScore > 25) risk = "MEDIUM";
-
-  systemData.ai = { risk, message, score: riskScore };
-
-  if (risk === "CRITICAL") {
-    addAlert("🚨 AI detected CRITICAL fault risk!");
-  }
-}
-
+systemData.ai.risk = mlResponse.data.risk;
+systemData.ai.message = "ML Prediction Active 🚀";
 /* ===== THRESHOLD ===== */
 function checkThresholds() {
   for (let i = 1; i <= 4; i++) {
