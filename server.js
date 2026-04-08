@@ -82,7 +82,7 @@ async function runML() {
   try {
     const response = await axios.post(
       // 🔴 CHANGE THIS WHEN DEPLOYING ML
-      "http://127.0.0.1:5000/predict",
+      "https://ml-model-cb.onrender.com/predict",
       {
         board1_power: systemData.boards[1].power,
         board2_power: systemData.boards[2].power,
