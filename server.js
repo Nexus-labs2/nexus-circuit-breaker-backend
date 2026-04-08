@@ -51,31 +51,7 @@ function addAlert(msg) {
   }
 }
 
-/* ===== AI LOGIC ===== */
-const mlResponse = await axios.post("http://127.0.0.1:5000/predict", {
-  board1_power: systemData.boards[1].power,
-  board2_power: systemData.boards[2].power,
-  board3_power: systemData.boards[3].power,
-  board4_power: systemData.boards[4].power,
-  temperature: systemData.temperature,
-  gas: systemData.gas
-});
-
-systemData.ai.risk = mlResponse.data.risk;
-systemData.ai.message = "ML Prediction Active 🚀";
-/* ===== THRESHOLD ===== */
-function checkThresholds() {
-  for (let i = 1; i <= 4; i++) {
-    let b = systemData.boards[i];
-
-    if (b.power > 400) {
-      b.relay = false;
-      addAlert(`⚡ Board ${i} power cut due to overload`);
-    }
-  }
-}
-
-/* ===== SAFETY ===== */
+/* ===== SAFETY CHECK ===== */
 function checkSafety() {
   if (systemData.temperature > 50) {
     systemData.coolingFan = true;
@@ -84,8 +60,48 @@ function checkSafety() {
     systemData.coolingFan = false;
   }
 
-  if (systemData.gas > 1) {
+  if (systemData.gas > 0) {
     addAlert("☠ Gas leakage detected");
+  }
+}
+
+/* ===== THRESHOLD CHECK ===== */
+function checkThresholds() {
+  for (let i = 1; i <= 4; i++) {
+    let b = systemData.boards[i];
+
+    if (b.power > 4000) {
+      b.relay = false;
+      addAlert(`⚡ Board ${i} power cut due to overload`);
+    }
+  }
+}
+
+/* ===== ML FUNCTION ===== */
+async function runML() {
+  try {
+    const response = await axios.post(
+      // 🔴 CHANGE THIS WHEN DEPLOYING ML
+      "http://127.0.0.1:5000/predict",
+      {
+        board1_power: systemData.boards[1].power,
+        board2_power: systemData.boards[2].power,
+        board3_power: systemData.boards[3].power,
+        board4_power: systemData.boards[4].power,
+        temperature: systemData.temperature,
+        gas: systemData.gas
+      }
+    );
+
+    systemData.ai.risk = response.data.risk;
+    systemData.ai.message = "ML Prediction Active 🚀";
+
+  } catch (err) {
+    console.error("❌ ML Error:", err.message);
+
+    // fallback if ML fails
+    systemData.ai.risk = "UNKNOWN";
+    systemData.ai.message = "ML unavailable";
   }
 }
 
@@ -99,8 +115,6 @@ async function saveToSupabase(data) {
       board4_power: data.boards?.[4]?.power ?? null,
       temperature: data.temperature ?? null,
       gas: data.gas ? true : false,
-
-      // ⚡ Only include these if columns exist in DB
       ai_risk: data.ai?.risk ?? null,
       ai_score: data.ai?.score ?? null
     };
@@ -135,6 +149,7 @@ app.post("/api/data", async (req, res) => {
 
     console.log("📥 Incoming:", incoming);
 
+    // Update boards
     for (let i = 1; i <= 4; i++) {
       if (incoming[`board${i}`]) {
         let b = incoming[`board${i}`];
@@ -146,6 +161,7 @@ app.post("/api/data", async (req, res) => {
       }
     }
 
+    // Update environment
     if (incoming.temperature !== undefined) {
       systemData.temperature = incoming.temperature;
     }
@@ -154,10 +170,14 @@ app.post("/api/data", async (req, res) => {
       systemData.gas = incoming.gas;
     }
 
+    // System logic
     checkThresholds();
     checkSafety();
-    runAI();
 
+    // 🔥 ML CALL (CORRECT PLACE)
+    await runML();
+
+    // Save data
     await saveToSupabase(systemData);
 
     res.json({ status: "OK", ai: systemData.ai });
@@ -168,7 +188,7 @@ app.post("/api/data", async (req, res) => {
   }
 });
 
-/* ===== SEND LIVE DATA ===== */
+/* ===== LIVE DATA ===== */
 app.get("/api/data", (req, res) => {
   res.json(systemData);
 });
